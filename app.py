@@ -15,7 +15,7 @@ client = openai.OpenAI(
 )
 
 # Use an absolute path or ensure the relative path is correct
-db_path = './Chinook.db'
+db_path = './RevenueData.db'
 st.write(f"Database path: {os.path.abspath(db_path)}")
 
 try:
@@ -64,7 +64,7 @@ if st.button("Run Query"):
             df = pd.DataFrame(rows, columns=columns)
 
             completion = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="meta-llama/Llama-3-8b-chat-hf",
                 messages=[
                     {"role": "system", "content": "You are a helpful SQL assistant. Provide a concise, human-readable answer based on the query results."},
                     {"role": "user", "content": f"Generate human-readable answer for SQL query: {sql_query}\nQuery result:\n{df.to_string()}"}
