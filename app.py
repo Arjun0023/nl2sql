@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+import openai
 import sqlite3
 import pandas as pd
 from dotenv import load_dotenv
@@ -7,9 +7,12 @@ import os
 import re
 
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+together_api_key = os.getenv("TOGETHER_API_KEY")
 
-client = OpenAI(api_key=api_key)
+client = openai.OpenAI(
+    api_key=together_api_key,
+    base_url="https://api.together.xyz/v1"
+)
 
 # Use an absolute path or ensure the relative path is correct
 db_path = './Chinook.db'
@@ -40,7 +43,7 @@ def is_valid_sql(query):
 if st.button("Run Query"):
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="meta-llama/Llama-3-8b-chat-hf",
             messages=[
                 {"role": "system", "content": f"You are a helpful SQL assistant. Generate only the SQL query without any explanations or markdown formatting. The available tables are: {', '.join([table[0] for table in tables])}"},
                 {"role": "user", "content": f"Generate SQL query for: {user_query}"}
