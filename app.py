@@ -8,7 +8,7 @@ import re
 
 load_dotenv()
 together_api_key = os.getenv("TOGETHER_API_KEY")
-
+print("API Key from .env:", os.getenv("TOGETHER_API_KEY"))
 client = openai.OpenAI(
     api_key=together_api_key,
     base_url="https://api.together.xyz/v1"
