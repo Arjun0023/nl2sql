@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 # Create a connection to the database
-conn = sqlite3.connect('RevenueData.db')
+conn = sqlite3.connect('TrainingData.db')
 
 # Create customers table
 conn.execute('''
@@ -41,17 +41,26 @@ CREATE TABLE sales (
 )
 ''')
 
+# Generate realistic company names
+company_names = [
+    "TechNova Inc.", "Greenfield Solutions", "AstroTech", "BlueSky Systems", "DeltaSoft",
+    "NextGen Hardware", "Pinnacle Services", "CloudAxis", "SmartEdge Technologies", "Visionary Consulting",
+    "PrimeWare", "Core Dynamics", "Skyline Enterprises", "EcoLogic Innovations", "Fusion Networks",
+    "Vanguard Systems", "Infinity Solutions", "QuantumSoft", "Summit Technologies", "AgileWorks"
+]
+
 # Generate sample customer data
 customers_data = []
 segments = ['Enterprise', 'SMB', 'Consumer']
 regions = ['North', 'South', 'East', 'West']
-start_date = datetime(2023, 1, 1)
+start_date = datetime(2021, 1, 1)  # Start date for join dates
+end_date = datetime(2024, 12, 31)  # End date for join dates
 
-for i in range(100):
-    join_date = start_date + timedelta(days=np.random.randint(0, 365))
+for i, company_name in enumerate(company_names):
+    join_date = start_date + timedelta(days=np.random.randint(0, (end_date - start_date).days + 1))
     customers_data.append({
         'customer_id': i + 1,
-        'customer_name': f'Customer {i+1}',
+        'customer_name': company_name,
         'segment': np.random.choice(segments),
         'region': np.random.choice(regions),
         'join_date': join_date.strftime('%Y-%m-%d')
@@ -60,24 +69,30 @@ for i in range(100):
 # Generate sample product data
 products_data = []
 categories = ['Software', 'Hardware', 'Services', 'Consulting']
+product_names = {
+    'Software': ["CRM Suite", "Project Management Tool", "Cloud Storage Pro", "AI Analytics Software"],
+    'Hardware': ["High-Performance Server", "Smart Router", "Workstation Pro", "Gaming Monitor"],
+    'Services': ["IT Support", "Cloud Migration Service", "Data Backup", "System Maintenance"],
+    'Consulting': ["Business Strategy Workshop", "IT Roadmap Planning", "Digital Transformation Advisory", "Process Optimization Consulting"]
+}
 base_prices = {'Software': 1000, 'Hardware': 500, 'Services': 200, 'Consulting': 2000}
 
-for i in range(20):
-    category = np.random.choice(categories)
-    products_data.append({
-        'product_id': i + 1,
-        'product_name': f'Product {i+1}',
-        'category': category,
-        'unit_price': round(base_prices[category] * (0.8 + np.random.random() * 0.4), 2)
-    })
+for category, names in product_names.items():
+    for name in names:
+        products_data.append({
+            'product_id': len(products_data) + 1,
+            'product_name': name,
+            'category': category,
+            'unit_price': round(base_prices[category] * (0.8 + np.random.random() * 0.4), 2)
+        })
 
 # Generate sample sales data
 sales_data = []
-for i in range(1000):
-    sale_date = start_date + timedelta(days=np.random.randint(0, 365))
-    customer_id = np.random.randint(1, 101)
-    product_id = np.random.randint(1, 21)
-    quantity = np.random.randint(1, 10)
+for i in range(3000):  # More sales to spread across years
+    sale_date = start_date + timedelta(days=np.random.randint(0, (end_date - start_date).days + 1))
+    customer_id = np.random.randint(1, len(company_names) + 1)
+    product_id = np.random.randint(1, len(products_data) + 1)
+    quantity = np.random.randint(1, 15)  # Higher quantity for realism
     
     # Get product price
     product_price = [p['unit_price'] for p in products_data if p['product_id'] == product_id][0]
