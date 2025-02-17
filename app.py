@@ -7,6 +7,7 @@ import plotly.graph_objs as go
 from dotenv import load_dotenv
 import os
 import re
+from io import BytesIO
 
 # Initialize session state variables
 if 'sql_query' not in st.session_state:
@@ -15,6 +16,10 @@ if 'df' not in st.session_state:
     st.session_state.df = None
 if 'text_answer' not in st.session_state:
     st.session_state.text_answer = ''
+if 'table_name' not in st.session_state:
+    st.session_state.table_name = None
+if 'conn' not in st.session_state:
+    st.session_state.conn = None
 
 load_dotenv()
 together_api_key = os.getenv("TOGETHER_API_KEY")
@@ -23,35 +28,9 @@ client = openai.OpenAI(
     base_url="https://api.together.xyz/v1"
 )
 
-# Use an absolute path or ensure the relative path is correct
-db_path = './TrainingData.db'
-st.write(f"Database path: {os.path.abspath(db_path)}")
-
-try:
-    conn = sqlite3.connect(db_path)
-    st.success("Successfully connected to the database.")
-    
-    # Fetch and display all table names
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables = cursor.fetchall()
-    st.write("Tables in the database:", [table[0] for table in tables])
-except sqlite3.Error as e:
-    st.error(f"Error connecting to database: {e}")
-    st.stop()
-
-st.title("Final Year Project Prototype")
-
-# Function to reset session state
-def reset_session_state():
-    st.session_state.sql_query = ''
-    st.session_state.df = None
-    st.session_state.text_answer = ''
-
-def is_valid_sql(query):
-    # Basic SQL validation
-    sql_keywords = r'\b(SELECT|FROM|WHERE|JOIN|GROUP BY|ORDER BY|LIMIT)\b'
-    return bool(re.search(sql_keywords, query, re.IGNORECASE))
+def create_connection():
+    """Create an in-memory SQLite database connection"""
+    return sqlite3.connect(':memory:')
 
 def create_visualizations(df):
     """
@@ -104,55 +83,8 @@ def create_visualizations(df):
                                  title=f"{bar_num_col} by {bar_cat_col}")
                 st.plotly_chart(bar_fig, use_container_width=True)
 
-# Main query processing
-def process_query(user_query):
-    try:
-        completion = client.chat.completions.create(
-            model="meta-llama/Llama-3-8b-chat-hf",
-            messages=[
-                {"role": "system", "content": f"You are a helpful SQL assistant. Generate only the SQL query without any explanations or markdown formatting. The available tables are: {', '.join([table[0] for table in tables])}"},
-                {"role": "user", "content": f"Generate SQL query for: {user_query}"}
-            ]
-        )
-        sql_query = completion.choices[0].message.content.strip()
-        st.session_state.sql_query = sql_query
-
-        st.write("Generated SQL Query:")
-        st.code(sql_query, language="sql")
-
-        if not is_valid_sql(sql_query):
-            st.error("The generated query doesn't appear to be valid SQL. Please try rephrasing your question.")
-            return None
-
-        cursor = conn.execute(sql_query)
-        rows = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
-
-        df = pd.DataFrame(rows, columns=columns)
-        st.session_state.df = df
-
-        completion = client.chat.completions.create(
-            model="meta-llama/Llama-3-8b-chat-hf",
-            messages=[
-                {"role": "system", "content": "You are a helpful SQL assistant. Provide a concise, human-readable answer based on the query results."},
-                {"role": "user", "content": f"Generate human-readable answer for SQL query: {sql_query}\nQuery result:\n{df.to_string()}"}
-            ]
-        )
-        text_answer = completion.choices[0].message.content
-        st.session_state.text_answer = text_answer
-
-        return df
-
-    except sqlite3.Error as e:
-        st.error(f"SQLite Error: {e}")
-        st.write("Error details:")
-        st.write(f"SQL Query: {sql_query}")
-        st.write(f"Available tables: {[table[0] for table in tables]}")
-    except Exception as e:
-        st.error(f"Error: {e}")
-    
-    return None
 def generate_summary_and_insights(df, user_query):
+    """Generate summary and insights from the data"""
     if df is not None and not df.empty:
         try:
             completion = client.chat.completions.create(
@@ -170,30 +102,145 @@ def generate_summary_and_insights(df, user_query):
     else:
         return "No data available for generating insights."
 
+def upload_and_process_file():
+    """Handle file upload and create SQLite table"""
+    uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=['xlsx', 'csv'])
+    
+    if uploaded_file is not None:
+        try:
+            # Read the file
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            
+            # Create a new database connection
+            st.session_state.conn = create_connection()
+            
+            # Generate a table name from the file name
+            table_name = re.sub(r'[^a-zA-Z0-9]', '_', uploaded_file.name.split('.')[0].lower())
+            st.session_state.table_name = table_name
+            
+            # Save DataFrame to SQLite
+            df.to_sql(table_name, st.session_state.conn, if_exists='replace', index=False)
+            
+            # Display success message and data preview
+            st.success(f"File uploaded successfully! Table name: {table_name}")
+            st.write("Data Preview:")
+            st.write(df.head())
+            
+            # Display column information
+            st.write("Column Information:")
+            column_info = pd.DataFrame({
+                'Column Name': df.columns,
+                'Data Type': df.dtypes.values
+            })
+            st.write(column_info)
+            
+            return df.columns.tolist()
+            
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+            return None
+    return None
+
+def generate_sql_prompt(columns, user_query, table_name):
+    """Generate a prompt for the LLM to create SQL query"""
+    column_info = "\n".join([f"- {col}" for col in columns])
+    prompt = f"""Given a table named '{table_name}' with the following columns:
+{column_info}
+
+Generate a SQL query to answer: {user_query}
+
+Remember to:
+1. Use only the columns that exist in the table
+2. Keep the query simple and efficient
+3. Return relevant columns for visualization if appropriate
+
+Generate ONLY the SQL query without any explanation or additional text."""
+    return prompt
+
+def is_valid_sql(query):
+    """Basic SQL validation"""
+    sql_keywords = r'\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|LIMIT)\b'
+    return bool(re.search(sql_keywords, query, re.IGNORECASE))
+
+def process_query(user_query, columns):
+    """Process the user query and generate SQL"""
+    if st.session_state.table_name is None:
+        st.error("Please upload a file first!")
+        return None
+        
+    try:
+        # Generate SQL query using LLM
+        prompt = generate_sql_prompt(columns, user_query, st.session_state.table_name)
+        completion = client.chat.completions.create(
+            model="meta-llama/Llama-3-8b-chat-hf",
+            messages=[
+                {"role": "system", "content": "You are a helpful SQL assistant. Generate only the SQL query without any explanations or markdown formatting."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        sql_query = completion.choices[0].message.content.strip()
+        st.session_state.sql_query = sql_query
+
+        st.write("Generated SQL Query:")
+        st.code(sql_query, language="sql")
+
+        if not is_valid_sql(sql_query):
+            st.error("The generated query doesn't appear to be valid SQL. Please try rephrasing your question.")
+            return None
+
+        # Execute query
+        cursor = st.session_state.conn.execute(sql_query)
+        rows = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+
+        df = pd.DataFrame(rows, columns=columns)
+        st.session_state.df = df
+
+        return df
+
+    except sqlite3.Error as e:
+        st.error(f"SQLite Error: {e}")
+    except Exception as e:
+        st.error(f"Error: {e}")
+    
+    return None
+
+# Main app layout
+st.title("Data Analysis Dashboard")
+
+# File upload section
+columns = upload_and_process_file()
+
 # Sidebar for query input
 with st.sidebar:
     st.header("Query Input")
-    user_query = st.text_input("Enter your query", placeholder="Query goes here", key='user_query_input')
+    user_query = st.text_input("Enter your query", 
+                              placeholder="e.g., Show me revenue by product",
+                              key='user_query_input')
     
     # Query submission button
     if st.button("Run Query", key='run_query_button'):
-        # Reset session state when a new query is run
-        reset_session_state()
-        
-        # Process the query
-        result_df = process_query(user_query)
+        if columns:
+            result_df = process_query(user_query, columns)
+        else:
+            st.error("Please upload a file first!")
 
-# Main content area
+# Display results and visualizations
 if st.session_state.df is not None:
-    # st.write("Text Answer:")
-    # st.markdown(st.session_state.text_answer)
-    
     st.write("Table Output:")
     st.table(st.session_state.df)
-    st.write("Summary and Actionable Insights:")
+    
+    # Generate insights
     insights = generate_summary_and_insights(st.session_state.df, user_query)
+    st.write("Summary and Actionable Insights:")
     st.markdown(insights)
-    # Visualizations
+    
+    # Create visualizations
     create_visualizations(st.session_state.df)
 
-conn.close()
+# Cleanup connection when the app is done
+if st.session_state.conn is not None:
+    st.session_state.conn.close()
