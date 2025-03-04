@@ -128,7 +128,7 @@ def upload_and_process_file():
             st.success(f"File uploaded successfully! Table name: {table_name}")
             st.write("Data Preview:")
             st.write(df.head())
-            
+            #
             # Display column information
             st.write("Column Information:")
             column_info = pd.DataFrame({
